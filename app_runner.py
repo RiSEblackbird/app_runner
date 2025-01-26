@@ -18,6 +18,7 @@ import win32api
 import time
 import socket
 import csv
+from tkinter import ttk
 
 # 定数定義
 TARGET_WINDOW_TITLE = "GUIツールランナー.exe"
@@ -166,10 +167,15 @@ class App(tk.Tk):
         ウィジェットを作成し、ウィンドウに配置する
         """
         # 使用するフォントの設定
-        default_font = tkfont.Font(size=FONT_SIZE)  # デフォルトのフォントサイズ
+        default_font = tkfont.Font(size=FONT_SIZE)
 
-        # フォルダ操作エリア
-        folder_frame = tk.Frame(self)  # フォルダ操作用のフレームを作成
+        # Treeviewのスタイル設定
+        style = ttk.Style()
+        style.configure("Treeview", font=('', FONT_SIZE))  # フォントサイズを設定
+        style.configure("Treeview.Heading", font=('', FONT_SIZE))  # ヘッダーのフォントサイズを設定
+
+        # フォルダ操作エリア（1行目）
+        folder_frame = tk.Frame(self)
         folder_frame.pack(padx=10, pady=5)
 
         self.folder_path_entry = tk.Entry(folder_frame, width=20, font=default_font)  # 入力フォームの作成
@@ -184,22 +190,53 @@ class App(tk.Tk):
         self.open_vscode_button = tk.Button(folder_frame, text="VSCodeで開く", command=self.open_vscode, font=default_font)  # VSCodeで開くボタンの作成
         self.open_vscode_button.grid(row=0, column=3)
 
-        # ファイル一覧エリア
-        # ファイルリストのリストボックスの作成
-        self.file_listbox = tk.Listbox(self, width=40, height=10, font=default_font, selectmode='extended')  # 複数選択可能にする
-
-        self.file_listbox.pack(padx=10, pady=10)
-
-        # 実行と終了ボタンエリア
-        run_exit_frame = tk.Frame(self)  # 実行と終了用のフレームを作成
+        # 実行と終了ボタンエリア（2行目）
+        run_exit_frame = tk.Frame(self)
         run_exit_frame.pack(padx=10, pady=5)
 
-        self.run_button = tk.Button(run_exit_frame, text="RUN", command=self.run_python_files, font=default_font)  # RUNボタンの作成
+        self.run_button = tk.Button(run_exit_frame, text="RUN", command=self.run_python_files, font=default_font)
         self.run_button.pack(side=tk.LEFT, padx=5)
 
-        self.exit_button = tk.Button(run_exit_frame, text="アプリ終了", command=self.destroy, font=default_font)  # 終了ボタンの作成
+        self.run_main_button = tk.Button(run_exit_frame, text="RUN MAIN", command=self.run_main_files, font=default_font)
+        self.run_main_button.pack(side=tk.LEFT, padx=5)
+
+        self.exit_button = tk.Button(run_exit_frame, text="アプリ終了", command=self.destroy, font=default_font)
         self.exit_button.pack(side=tk.LEFT, padx=5)
+
+        # ファイル一覧エリア（3行目以降）
+        tree_frame = tk.Frame(self)
+        tree_frame.pack(padx=10, pady=10, fill='both', expand=True)
         
+        # Gridの設定
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        self.file_tree = ttk.Treeview(tree_frame, columns=('priority', 'app_name', 'filename', 'path'), show='headings', height=10, selectmode='extended')
+        
+        # マウスドラッグによる選択を有効にする
+        self.file_tree.bind('<B1-Motion>', self.on_drag)
+        self.file_tree.bind('<Button-1>', self.on_click)
+        
+        # 列の設定
+        self.file_tree.heading('priority', text='優先度')
+        self.file_tree.heading('app_name', text='アプリ名')
+        self.file_tree.heading('filename', text='pyファイル名')
+        self.file_tree.heading('path', text='絶対パス')
+        
+        # 列の幅設定
+        self.file_tree.column('priority', width=50, anchor='center')
+        self.file_tree.column('app_name', width=200)
+        self.file_tree.column('filename', width=150)
+        self.file_tree.column('path', width=300)
+        
+        # スクロールバーの追加
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.file_tree.yview)
+        self.file_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # TreeviewとスクロールバーをGridで配置
+        self.file_tree.grid(row=0, column=0, sticky='nsew')
+        scrollbar.grid(row=0, column=1, sticky='ns')
+
     def open_folder(self):
         folder_path = self.folder_path_entry.get()  # フォルダパスを取得
         if sys.platform == "win32":
@@ -229,41 +266,63 @@ class App(tk.Tk):
     
     def update_file_list(self, folder):
         """
-        指定されたフォルダ内のPythonファイルをアプリ名でソートして一覧表示する。
-        アプリ名を最初の列に、ファイル名を2列目に表示する。
+        指定されたフォルダ内のPythonファイルをテーブル形式で表示する
         """
-        self.file_listbox.delete(0, tk.END)  # リストボックスの内容をクリア
+        # 既存の項目をクリア
+        for item in self.file_tree.get_children():
+            self.file_tree.delete(item)
 
-        # フォルダ内のPythonファイルとそのアプリ名をリストに追加
-        files_with_app_names = []
+        # フォルダ内のPythonファイルとその情報をリストに追加
+        files_info = []
         for filename in os.listdir(folder):
             if filename.endswith(PYTHON_FILE_EXTENSION) and filename.startswith(APP_TITLE_PARTS):
                 full_path = os.path.join(folder, filename)
-                app_name = self.extract_app_name(full_path)  # アプリ名を抽出
-                files_with_app_names.append((app_name, filename))
+                tmp_name = self.extract_raw_app_name(full_path)  # 優先度を含むアプリ名を取得
+                priority = self.extract_priority(tmp_name)  # 優先度を抽出
+                app_name = self.extract_app_name(tmp_name)  # アプリ名から優先度部分を除去
+                files_info.append((priority, app_name, filename, full_path))
 
-        # アプリ名でソート
-        sorted_files = sorted(files_with_app_names, key=lambda x: x[0])
+        # 優先度でソート
+        sorted_files = sorted(files_info, key=lambda x: x[0])
 
-        # ソートされたファイルをリストボックスに追加
-        for app_name, filename in sorted_files:
-            self.file_listbox.insert(tk.END, [f' {app_name} ', filename])
+        # ソートされたファイルをTreeviewに追加
+        for priority, app_name, filename, full_path in sorted_files:
+            self.file_tree.insert('', 'end', values=(priority, app_name, filename, full_path))
 
-
-    def extract_app_name(self, file_path):
+    def extract_raw_app_name(self, file_path):
         """
-        指定されたPythonファイルからアプリ名を抽出する。
+        指定されたPythonファイルから優先度を含むアプリ名を抽出する。
         """
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 lines = [next(file) for _ in range(5)]  # ファイルから最初の5行を読み込む
             for line in lines:
                 if line.startswith("# アプリ名:"):  # アプリ名の行を探す
-                    return line.strip().split(": ", 1)[1]  # アプリ名を返す
+                    return line.strip().split(": ", 1)[1]
             return "名前未設定"  # アプリ名が見つからなかった場合
         except Exception as e:
-            # messagebox.showerror("エラー", f"アプリ名の読み込みに失敗しました: {e}")
             return "読み込み失敗"
+
+    def extract_app_name(self, raw_name):
+        """
+        優先度を含むアプリ名から優先度部分を除去する。
+        """
+        if ". " in raw_name:
+            return raw_name.split(". ")[1]
+        return raw_name
+
+    def extract_priority(self, raw_name):
+        """
+        アプリ名から優先度を抽出する。
+        例: "0. ザ・アプリ" -> 0
+        """
+        try:
+            if raw_name and raw_name[0].isdigit() and ". " in raw_name:
+                priority_str = raw_name.split(". ")[0]
+                return int(priority_str)
+            return 999  # 優先度が見つからない場合
+        except (ValueError, IndexError):
+            return 999  # 優先度の解析に失敗した場合
     
     
     # 各スクリプトを別々のスレッドで実行する
@@ -271,23 +330,73 @@ class App(tk.Tk):
         """
         選択されたPythonファイルを新しいスレッドで一括実行する
         """
-        selected_indices = self.file_listbox.curselection()  # 選択されたリストボックスのインデックスを取得
-        if selected_indices:  # ファイルが選択されている場合
-            selected_files = [self.file_listbox.get(idx) for idx in selected_indices]  # 選択されたファイル名を取得
-            for selected_file in selected_files:
-                if isinstance(selected_file, tuple):  # 選択された項目がタプルの場合
-                    file_path = os.path.join(self.folder_path_entry.get(), selected_file[1])  # 実行するファイルのフルパスを取得
-                    try:
-                        threading.Thread(target=execute_script, args=(file_path,), daemon=True).start()  # 各ファイルを別々のスレッドで実行
-                        time.sleep(0.1)
-                    except Exception:
-                        except_processing()
+        selected_items = self.file_tree.selection()
+        if selected_items:
+            for item in selected_items:
+                # 選択された項目から絶対パスを取得
+                values = self.file_tree.item(item)['values']
+                file_path = values[3]  # 絶対パスは4番目の列
+                try:
+                    threading.Thread(target=execute_script, args=(file_path,), daemon=True).start()
+                    time.sleep(0.1)
+                except Exception:
+                    except_processing()
+
+    def run_main_files(self):
+        """
+        優先度0のPythonファイルを一括実行する
+        """
+        main_items = []
+        for item in self.file_tree.get_children():
+            values = self.file_tree.item(item)['values']
+            if values[0] == 0:  # 優先度が0のアイテムを選択
+                main_items.append(item)
+        
+        if main_items:
+            for item in main_items:
+                values = self.file_tree.item(item)['values']
+                file_path = values[3]  # 絶対パスは4番目の列
+                try:
+                    threading.Thread(target=execute_script, args=(file_path,), daemon=True).start()
+                    time.sleep(0.1)
+                except Exception:
+                    except_processing()
+
+    def on_click(self, event):
+        """クリック時の処理"""
+        self.start_item = self.file_tree.identify_row(event.y)
+        if not self.start_item:
+            return
+        
+        # Ctrlキーが押されていない場合は既存の選択をクリア
+        if not event.state & 0x4:  # Ctrlキーの状態をチェック
+            self.file_tree.selection_set(self.start_item)
+
+    def on_drag(self, event):
+        """ドラッグ時の処理"""
+        drag_item = self.file_tree.identify_row(event.y)
+        if not drag_item:
+            return
+        
+        # 全アイテムを取得
+        all_items = self.file_tree.get_children()
+        start_idx = all_items.index(self.start_item)
+        current_idx = all_items.index(drag_item)
+        
+        # 選択範囲を決定
+        if start_idx <= current_idx:
+            items_to_select = all_items[start_idx:current_idx + 1]
+        else:
+            items_to_select = all_items[current_idx:start_idx + 1]
+        
+        # 選択を更新
+        self.file_tree.selection_set(items_to_select)
 
 
 # 定数定義
 ENCODING_FOR_CSV = "utf_8_sig"
 PYTHON_FILE_EXTENSION = ".py"  # Pythonファイルの拡張子
-FONT_SIZE = 14  # 基本フォントサイズ
+FONT_SIZE = 12  # 基本フォントサイズ
 APP_TITLE_PARTS = "app_"
 
 # YAML設定ファイルパス
