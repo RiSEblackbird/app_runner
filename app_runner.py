@@ -219,10 +219,13 @@ class App(QMainWindow):
         
         # 列幅の設定
         header = self.file_tree.header()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Interactive)
-        header.setSectionResizeMode(2, QHeaderView.Interactive)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # 優先度
+        header.setSectionResizeMode(1, QHeaderView.Interactive)       # アプリ名
+        header.setSectionResizeMode(2, QHeaderView.Interactive)       # pyファイル名
+        header.setSectionResizeMode(3, QHeaderView.Stretch)          # 絶対パス
+        
+        # pyファイル名の列の初期幅を設定（例：200ピクセル）
+        self.file_tree.setColumnWidth(2, 200)
         
         # シグナル/スロットの接続
         self.browse_button.clicked.connect(self.browse_folder)
