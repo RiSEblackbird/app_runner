@@ -16,7 +16,7 @@
 
 ## 技術仕様
 - 開発言語: Python
-- GUIフレームワーク: tkinter, ttk
+- GUIフレームワーク: PySide6 (Qt)
 - 設定ファイル: YAML
 - ウィンドウ位置保存: CSV
 
