@@ -22,7 +22,7 @@ from tkinter import ttk
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                               QHBoxLayout, QLineEdit, QPushButton, QTreeWidget, 
                               QTreeWidgetItem, QHeaderView)
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import Qt, QThread, QTimer
 
 # 定数定義
 TARGET_WINDOW_TITLE = "GUIツールランナー.exe"
@@ -143,12 +143,17 @@ def execute_script(script_path, attempt=1):
     """
     max_attempts = 3  # 最大再起動回数
     try:
-        result = subprocess.run(["python", script_path], check=True, text=True)
-        print(f"'{script_path}' executed successfully.")  # 実行成功をログに記録
+        # シンプルに実行するだけ（コンソール制御なし）
+        result = subprocess.run(
+            ["python", script_path], 
+            check=True, 
+            text=True
+        )
+        print(f"'{script_path}' executed successfully.")
     except subprocess.CalledProcessError as e:
         if attempt <= max_attempts:
             print(f"Error executing '{script_path}': {e}. Attempt {attempt}/{max_attempts}. Retrying...")
-            execute_script(script_path, attempt + 1)  # 再試行
+            execute_script(script_path, attempt + 1)
         else:
             messagebox.showerror("エラー", f"'{script_path}' failed after {max_attempts} attempts.")
     except Exception as e:
@@ -171,10 +176,12 @@ class App(QMainWindow):
         self.update_file_list(DEFAULT_FOLDER_PATH)
         
         # ウィンドウ位置の調整を遅延実行
-        QThread.msleep(100)
-        self.adjust_window_position()
+        QTimer.singleShot(100, self.adjust_window_position)
 
     def adjust_window_position(self):
+        """
+        アプリケーションウィンドウとコンソールウィンドウの位置を調整
+        """
         # アプリのウインドウが作成された後にウインドウ位置を調整
         move_window_inside_relative(TARGET_WINDOW_TITLE, DESTINATION_WINDOW_TITLE, INNER_PADDING)
         # DESTINATION_WINDOW_TITLE のウィンドウを最前面に表示
