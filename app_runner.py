@@ -349,15 +349,15 @@ class App(QMainWindow):
         優先度0のPythonファイルを一括実行する
         """
         main_items = []
-        for item in self.file_tree.get_children():
-            values = self.file_tree.item(item)['values']
-            if values[0] == 0:  # 優先度が0のアイテムを選択
+        # すべてのトップレベルアイテムを取得
+        for i in range(self.file_tree.topLevelItemCount()):
+            item = self.file_tree.topLevelItem(i)
+            if item.text(0) == "0":  # 優先度が0のアイテムを選択
                 main_items.append(item)
         
         if main_items:
             for item in main_items:
-                values = self.file_tree.item(item)['values']
-                file_path = values[3]  # 絶対パスは4番目の列
+                file_path = item.text(3)  # 絶対パスは4列目
                 try:
                     threading.Thread(target=execute_script, args=(file_path,), daemon=True).start()
                     time.sleep(0.1)
