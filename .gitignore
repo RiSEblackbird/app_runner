@@ -1,0 +1,5 @@
+# ウィンドウ位置保存ファイル
+window_position_*.txt
+window_position_*.csv
+
+desktop_gui_settings.yaml
