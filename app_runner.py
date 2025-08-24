@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                               QHBoxLayout, QLineEdit, QPushButton, QTreeWidget, 
                               QTreeWidgetItem, QHeaderView)
 from PySide6.QtCore import Qt, QThread, QTimer
+import ctypes
 
 # 定数定義
 TARGET_WINDOW_TITLE = "GUIツールランナー.exe"
@@ -64,7 +65,18 @@ def move_window_inside_relative(target_title, destination_title, padding):
                 break  # 適切なモニターが見つかったらループを抜ける
 
         print(f"移動後の '{target_title}' のウインドウの新しい位置: ({new_x}, {new_y})")
-        win32gui.SetWindowPos(win32gui.FindWindow(None, target_title), None, new_x, new_y, 0, 0, win32con.SWP_NOZORDER | win32con.SWP_NOSIZE)
+        # 対象ウィンドウのハンドル取得（タイトル一致が無ければコンソールにフォールバック）
+        hwnd_target = win32gui.FindWindow(None, target_title)
+        if not hwnd_target:
+            hwnd_target = ctypes.windll.kernel32.GetConsoleWindow()
+
+        if hwnd_target:
+            try:
+                win32gui.SetWindowPos(hwnd_target, None, new_x, new_y, 0, 0, win32con.SWP_NOZORDER | win32con.SWP_NOSIZE)
+            except Exception as e:
+                print(f"SetWindowPos 失敗: {e}")
+        else:
+            print(f"対象ウィンドウが見つかりませんでした: '{target_title}'。処理をスキップします。")
 
 
 def save_position(root):
@@ -281,18 +293,37 @@ class App(QMainWindow):
     
     def update_file_list(self, folder):
         """
-        指定されたフォルダ内のPythonファイルをツリー形式で表示する
+        指定されたフォルダ直下と、その直下のサブフォルダ（1階層目）のPythonファイルをツリー形式で表示する
         """
         self.file_tree.clear()
         
         files_info = []
-        for filename in os.listdir(folder):
-            if filename.endswith(PYTHON_FILE_EXTENSION) and filename.startswith(APP_TITLE_PARTS):
-                full_path = os.path.join(folder, filename)
-                tmp_name = self.extract_raw_app_name(full_path)
-                priority = self.extract_priority(tmp_name)
-                app_name = self.extract_app_name(tmp_name)
-                files_info.append((priority, app_name, filename, full_path))
+        try:
+            for entry in os.listdir(folder):
+                path = os.path.join(folder, entry)
+
+                # 直下のファイル
+                if os.path.isfile(path):
+                    if entry.endswith(PYTHON_FILE_EXTENSION) and entry.startswith(APP_TITLE_PARTS):
+                        tmp_name = self.extract_raw_app_name(path)
+                        priority = self.extract_priority(tmp_name)
+                        app_name = self.extract_app_name(tmp_name)
+                        files_info.append((priority, app_name, entry, path))
+
+                # 直下のサブフォルダ（1階層目）
+                elif os.path.isdir(path):
+                    try:
+                        for filename in os.listdir(path):
+                            child = os.path.join(path, filename)
+                            if os.path.isfile(child) and filename.endswith(PYTHON_FILE_EXTENSION) and filename.startswith(APP_TITLE_PARTS):
+                                tmp_name = self.extract_raw_app_name(child)
+                                priority = self.extract_priority(tmp_name)
+                                app_name = self.extract_app_name(tmp_name)
+                                files_info.append((priority, app_name, filename, child))
+                    except Exception:
+                        continue
+        except Exception:
+            except_processing()
         
         sorted_files = sorted(files_info, key=lambda x: x[0])
         
