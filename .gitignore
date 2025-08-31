@@ -1,6 +1,4 @@
-# ウィンドウ位置保存ファイル
-window_position_*.txt
-window_app_*.txt
-window_position_*.csv
+*.txt
+*.csv
 *.db
-desktop_gui_settings.yaml
+*.yaml
