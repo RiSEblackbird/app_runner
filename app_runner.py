@@ -360,6 +360,7 @@ class App(QMainWindow):
         self.file_tree.clear()
 
         try:
+            app_rows = []
             with open(APPS_CSV_FILE, newline='', encoding=ENCODING_FOR_CSV) as csvfile:
                 reader = csv.reader(csvfile)
                 # 先頭行はヘッダーとして扱う
@@ -369,8 +370,21 @@ class App(QMainWindow):
                         # 想定外の行はスキップする
                         continue
                     priority, app_name, filename, full_path = row[:4]
-                    item = QTreeWidgetItem([str(priority), app_name, filename, full_path])
-                    self.file_tree.addTopLevelItem(item)
+                    app_rows.append((priority, app_name, filename, full_path))
+
+            def _safe_priority(value):
+                """CSVの優先度文字列を数値へ変換し、失敗時は末尾扱いにする。"""
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return 999
+
+            # 優先度→アプリ名→ファイル名で安定表示
+            for priority, app_name, filename, full_path in sorted(
+                app_rows, key=lambda row: (_safe_priority(row[0]), row[1], row[2])
+            ):
+                item = QTreeWidgetItem([str(priority), app_name, filename, full_path])
+                self.file_tree.addTopLevelItem(item)
         except FileNotFoundError:
             messagebox.showerror("エラー", f"アプリCSVファイルが見つかりません: {APPS_CSV_FILE}")
         except Exception:
@@ -526,6 +540,9 @@ class CsvEditorWindow(QMainWindow):
                         value = row[col_index] if col_index < len(row) else ""
                         item = QTableWidgetItem(value)
                         self.table.setItem(row_index, col_index, item)
+            # メイン画面のアプリ一覧も同期させてUI差異を防ぐ
+            if self._app is not None:
+                self._app.update_file_list()
         except FileNotFoundError:
             # ファイルが無ければ空の状態から編集開始できるようにする
             pass
