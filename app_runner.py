@@ -372,16 +372,9 @@ class App(QMainWindow):
                     priority, app_name, filename, full_path = row[:4]
                     app_rows.append((priority, app_name, filename, full_path))
 
-            def _safe_priority(value):
-                """CSVの優先度文字列を数値へ変換し、失敗時は末尾扱いにする。"""
-                try:
-                    return int(value)
-                except (TypeError, ValueError):
-                    return 999
-
             # 優先度→アプリ名→ファイル名で安定表示
             for priority, app_name, filename, full_path in sorted(
-                app_rows, key=lambda row: (_safe_priority(row[0]), row[1], row[2])
+                app_rows, key=lambda row: (parse_priority(row[0]), row[1], row[2])
             ):
                 item = QTreeWidgetItem([str(priority), app_name, filename, full_path])
                 self.file_tree.addTopLevelItem(item)
@@ -497,11 +490,13 @@ class CsvEditorWindow(QMainWindow):
         button_layout = QHBoxLayout(button_row)
         self.reload_button = QPushButton("再読み込み")
         self.auto_append_button = QPushButton("自動追記")
+        self.sort_priority_button = QPushButton("優先度ソート")
         self.save_button = QPushButton("保存")
         self.close_button = QPushButton("閉じる")
 
         button_layout.addWidget(self.reload_button)
         button_layout.addWidget(self.auto_append_button)
+        button_layout.addWidget(self.sort_priority_button)
         button_layout.addWidget(self.save_button)
         button_layout.addWidget(self.close_button)
 
@@ -513,6 +508,7 @@ class CsvEditorWindow(QMainWindow):
         # シグナル接続
         self.reload_button.clicked.connect(self.load_csv)
         self.auto_append_button.clicked.connect(self.auto_append_missing_apps)
+        self.sort_priority_button.clicked.connect(self.sort_and_save_by_priority)
         self.save_button.clicked.connect(self.save_csv)
         self.close_button.clicked.connect(self.close)
 
@@ -579,6 +575,34 @@ class CsvEditorWindow(QMainWindow):
         except Exception:
             except_processing()
 
+    def sort_and_save_by_priority(self):
+        """
+        テーブル行を優先度→アプリ名→pyファイル名でソートし、即座に保存する。
+        """
+        sorted_rows = []
+        for row in range(self.table.rowCount()):
+            row_values = []
+            for col in range(4):
+                item = self.table.item(row, col)
+                row_values.append(item.text().strip() if item else "")
+
+            # 空行は対象外
+            if not any(row_values):
+                continue
+
+            sorted_rows.append(row_values)
+
+        sorted_rows.sort(key=lambda values: (parse_priority(values[0]), values[1], values[2]))
+
+        self.table.setRowCount(0)
+        for row_values in sorted_rows:
+            row_index = self.table.rowCount()
+            self.table.insertRow(row_index)
+            for col, value in enumerate(row_values):
+                self.table.setItem(row_index, col, QTableWidgetItem(value))
+
+        self.save_csv()
+
     def auto_append_missing_apps(self):
         """
         DEFAULT_FOLDER_PATH 配下からアプリ用Pythonファイルを探索し、
@@ -617,6 +641,18 @@ ENCODING_FOR_CSV = "utf_8_sig"
 PYTHON_FILE_EXTENSION = ".py"  # Pythonファイルの拡張子
 FONT_SIZE = 12  # 基本フォントサイズ
 APP_TITLE_PARTS = "app_"
+
+
+def parse_priority(value, fallback=999):
+    """
+    CSVやヘッダから取得した優先度文字列を数値へ変換する。
+    不正値は fallback（デフォルト999）として扱い、末尾表示を担保する。
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
 
 # YAML設定ファイルパス
 yaml_settings_path = 'desktop_gui_settings.yaml'
