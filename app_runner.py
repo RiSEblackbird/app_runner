@@ -19,9 +19,10 @@ import time
 import socket
 import csv
 from tkinter import ttk
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                              QHBoxLayout, QLineEdit, QPushButton, QTreeWidget, 
-                              QTreeWidgetItem, QHeaderView)
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                              QHBoxLayout, QLineEdit, QPushButton, QTreeWidget,
+                              QTreeWidgetItem, QHeaderView, QTableWidget,
+                              QTableWidgetItem, QMessageBox)
 from PySide6.QtCore import Qt, QThread, QTimer
 import ctypes
 
@@ -32,6 +33,9 @@ INNER_PADDING = 50
 
 # 定数としてウィンドウ位置情報を保存するファイル名を設定
 POSITION_FILE = 'window_position_app_runner.csv'
+
+# アプリ情報を保存するCSVファイルパスを定数として定義
+APPS_CSV_FILE = os.path.join(os.path.dirname(__file__), "app_runner_apps.csv")
 
 # 定数としてホスト名を取得
 HOSTNAME = socket.gethostname()
@@ -148,6 +152,45 @@ def except_processing():
     messagebox.showerror("エラーが発生しました", ''.join(trace))
 
 
+def find_app_python_files(base_folder):
+    """
+    DEFAULT_FOLDER_PATH直下と、その直下のサブフォルダ（1階層目）のPythonアプリファイルを探索し、
+    (priority, app_name, filename, full_path) のリストを返す。
+
+    「自動追記」機能で未登録アプリを検出するために使用する。
+    """
+    files_info = []
+    try:
+        for entry in os.listdir(base_folder):
+            path = os.path.join(base_folder, entry)
+
+            # 直下のファイル
+            if os.path.isfile(path):
+                if entry.endswith(PYTHON_FILE_EXTENSION) and entry.startswith(APP_TITLE_PARTS):
+                    tmp_name = App.extract_raw_app_name_static(path)
+                    priority = App.extract_priority_static(tmp_name)
+                    app_name = App.extract_app_name_static(tmp_name)
+                    files_info.append((priority, app_name, entry, path))
+
+            # 直下のサブフォルダ（1階層目）
+            elif os.path.isdir(path):
+                try:
+                    for filename in os.listdir(path):
+                        child = os.path.join(path, filename)
+                        if os.path.isfile(child) and filename.endswith(PYTHON_FILE_EXTENSION) and filename.startswith(APP_TITLE_PARTS):
+                            tmp_name = App.extract_raw_app_name_static(child)
+                            priority = App.extract_priority_static(tmp_name)
+                            app_name = App.extract_app_name_static(tmp_name)
+                            files_info.append((priority, app_name, filename, child))
+                except Exception:
+                    # 個々のサブフォルダのエラーは無視し、全体の処理は継続する
+                    continue
+    except Exception:
+        except_processing()
+
+    return files_info
+
+
 # スクリプトを非同期で実行し、必要に応じて再起動する関数
 def execute_script(script_path, attempt=1):
     """
@@ -181,11 +224,14 @@ class App(QMainWindow):
         # メインウィジェットとレイアウトの設定
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
-        
+        QVBoxLayout(main_widget)
+
+        # サブウィンドウ（CSV編集ウィンドウ）への参照を保持する
+        self.csv_editor_window = None
+
         self.create_widgets()
         self.folder_path_entry.setText(DEFAULT_FOLDER_PATH)
-        self.update_file_list(DEFAULT_FOLDER_PATH)
+        self.update_file_list()
         
         # ウィンドウ位置の調整を遅延実行
         QTimer.singleShot(100, self.adjust_window_position)
@@ -213,6 +259,7 @@ class App(QMainWindow):
         self.browse_button = QPushButton("選択")
         self.open_folder_button = QPushButton("フォルダを開く")
         self.open_vscode_button = QPushButton("VSCodeで開く")
+        self.edit_csv_button = QPushButton("アプリCSV編集")
         
         folder_layout.addWidget(self.folder_path_entry)
         folder_layout.addWidget(self.browse_button)
@@ -229,6 +276,7 @@ class App(QMainWindow):
         
         run_exit_layout.addWidget(self.run_button)
         run_exit_layout.addWidget(self.run_main_button)
+        run_exit_layout.addWidget(self.edit_csv_button)
         run_exit_layout.addWidget(self.exit_button)
         
         # ファイル一覧エリア（3行目以降）
@@ -252,6 +300,7 @@ class App(QMainWindow):
         self.open_vscode_button.clicked.connect(self.open_vscode)
         self.run_button.clicked.connect(self.run_python_files)
         self.run_main_button.clicked.connect(self.run_main_files)
+        self.edit_csv_button.clicked.connect(self.open_csv_editor)
         self.exit_button.clicked.connect(self.close)
         
         # レイアウトに追加
@@ -264,6 +313,17 @@ class App(QMainWindow):
         central_widget = QWidget()
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
+
+    def open_csv_editor(self):
+        """
+        アプリ情報CSVを編集する専用ウィンドウを開く。
+        既に開いている場合は、そのウィンドウを前面に出す。
+        """
+        if self.csv_editor_window is None:
+            self.csv_editor_window = CsvEditorWindow(self)
+        self.csv_editor_window.show()
+        self.csv_editor_window.raise_()
+        self.csv_editor_window.activateWindow()
 
     def open_folder(self):
         folder_path = self.folder_path_entry.text()  # フォルダパスを取得
@@ -287,51 +347,37 @@ class App(QMainWindow):
         """
         folder = filedialog.askdirectory()  # フォルダ選択ダイアログを表示
         if folder:  # フォルダが選択された場合
+            # 現在はフォルダパスは「フォルダを開く」「VSCodeで開く」で利用し、
+            # アプリ一覧自体はCSVから読み込む。
             self.folder_path_entry.setText(folder)  # 入力フォームに選択したフォルダのパスを挿入
-            self.update_file_list(folder)  # ファイルリストの更新
 
     
-    def update_file_list(self, folder):
+    def update_file_list(self, folder=None):
         """
-        指定されたフォルダ直下と、その直下のサブフォルダ（1階層目）のPythonファイルをツリー形式で表示する
+        アプリ情報CSVから一覧を読み込み、ツリー形式で表示する。
+        画面でのアプリ一覧は常にCSVの内容を反映する。
         """
         self.file_tree.clear()
-        
-        files_info = []
+
         try:
-            for entry in os.listdir(folder):
-                path = os.path.join(folder, entry)
-
-                # 直下のファイル
-                if os.path.isfile(path):
-                    if entry.endswith(PYTHON_FILE_EXTENSION) and entry.startswith(APP_TITLE_PARTS):
-                        tmp_name = self.extract_raw_app_name(path)
-                        priority = self.extract_priority(tmp_name)
-                        app_name = self.extract_app_name(tmp_name)
-                        files_info.append((priority, app_name, entry, path))
-
-                # 直下のサブフォルダ（1階層目）
-                elif os.path.isdir(path):
-                    try:
-                        for filename in os.listdir(path):
-                            child = os.path.join(path, filename)
-                            if os.path.isfile(child) and filename.endswith(PYTHON_FILE_EXTENSION) and filename.startswith(APP_TITLE_PARTS):
-                                tmp_name = self.extract_raw_app_name(child)
-                                priority = self.extract_priority(tmp_name)
-                                app_name = self.extract_app_name(tmp_name)
-                                files_info.append((priority, app_name, filename, child))
-                    except Exception:
+            with open(APPS_CSV_FILE, newline='', encoding=ENCODING_FOR_CSV) as csvfile:
+                reader = csv.reader(csvfile)
+                # 先頭行はヘッダーとして扱う
+                _ = next(reader, None)
+                for row in reader:
+                    if len(row) < 4:
+                        # 想定外の行はスキップする
                         continue
+                    priority, app_name, filename, full_path = row[:4]
+                    item = QTreeWidgetItem([str(priority), app_name, filename, full_path])
+                    self.file_tree.addTopLevelItem(item)
+        except FileNotFoundError:
+            messagebox.showerror("エラー", f"アプリCSVファイルが見つかりません: {APPS_CSV_FILE}")
         except Exception:
             except_processing()
-        
-        sorted_files = sorted(files_info, key=lambda x: x[0])
-        
-        for priority, app_name, filename, full_path in sorted_files:
-            item = QTreeWidgetItem([str(priority), app_name, filename, full_path])
-            self.file_tree.addTopLevelItem(item)
 
-    def extract_raw_app_name(self, file_path):
+    @staticmethod
+    def extract_raw_app_name_static(file_path):
         """
         指定されたPythonファイルから優先度を含むアプリ名を抽出する。
         """
@@ -342,10 +388,11 @@ class App(QMainWindow):
                 if line.startswith("# アプリ名:"):  # アプリ名の行を探す
                     return line.strip().split(": ", 1)[1]
             return "名前未設定"  # アプリ名が見つからなかった場合
-        except Exception as e:
+        except Exception:
             return "読み込み失敗"
 
-    def extract_app_name(self, raw_name):
+    @staticmethod
+    def extract_app_name_static(raw_name):
         """
         優先度を含むアプリ名から優先度部分を除去する。
         """
@@ -353,7 +400,8 @@ class App(QMainWindow):
             return raw_name.split(". ")[1]
         return raw_name
 
-    def extract_priority(self, raw_name):
+    @staticmethod
+    def extract_priority_static(raw_name):
         """
         アプリ名から優先度を抽出する。
         例: "0. ザ・アプリ" -> 0
@@ -365,6 +413,151 @@ class App(QMainWindow):
             return 999  # 優先度が見つからない場合
         except (ValueError, IndexError):
             return 999  # 優先度の解析に失敗した場合
+
+
+class CsvEditorWindow(QMainWindow):
+    """
+    アプリ情報CSV（app_runner_apps.csv）を編集するためのウィンドウ。
+    任意編集に加え、「自動追記」で未登録アプリを探索し追記できる。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("アプリCSV編集")
+        self.resize(900, 500)
+
+        # 親のAppインスタンス（更新通知用）
+        self._app = parent
+
+        central_widget = QWidget()
+        layout = QVBoxLayout()
+
+        # CSVの内容を表示・編集するテーブル
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(['優先度', 'アプリ名', 'pyファイル名', '絶対パス'])
+
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+
+        # 操作ボタン群
+        button_row = QWidget()
+        button_layout = QHBoxLayout(button_row)
+        self.reload_button = QPushButton("再読み込み")
+        self.auto_append_button = QPushButton("自動追記")
+        self.save_button = QPushButton("保存")
+        self.close_button = QPushButton("閉じる")
+
+        button_layout.addWidget(self.reload_button)
+        button_layout.addWidget(self.auto_append_button)
+        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.close_button)
+
+        layout.addWidget(self.table)
+        layout.addWidget(button_row)
+        central_widget.setLayout(layout)
+        self.setCentralWidget(central_widget)
+
+        # シグナル接続
+        self.reload_button.clicked.connect(self.load_csv)
+        self.auto_append_button.clicked.connect(self.auto_append_missing_apps)
+        self.save_button.clicked.connect(self.save_csv)
+        self.close_button.clicked.connect(self.close)
+
+        # 初期表示
+        self.load_csv()
+
+    def load_csv(self):
+        """
+        CSVファイルからデータを読み込み、テーブルに表示する。
+        """
+        self.table.setRowCount(0)
+        try:
+            with open(APPS_CSV_FILE, newline='', encoding=ENCODING_FOR_CSV) as csvfile:
+                reader = csv.reader(csvfile)
+                # 先頭行はヘッダー行として読み飛ばす
+                _ = next(reader, None)
+
+                for row in reader:
+                    # 空行や列数不足の行はスキップ
+                    if not row or len(row) < 4:
+                        continue
+                    row_index = self.table.rowCount()
+                    self.table.insertRow(row_index)
+                    for col_index in range(4):
+                        value = row[col_index] if col_index < len(row) else ""
+                        item = QTableWidgetItem(value)
+                        self.table.setItem(row_index, col_index, item)
+        except FileNotFoundError:
+            # ファイルが無ければ空の状態から編集開始できるようにする
+            pass
+        except Exception:
+            except_processing()
+
+    def save_csv(self):
+        """
+        テーブルの内容をCSVファイルに保存する。
+        空行はスキップし、ヘッダー行を先頭に出力する。
+        """
+        try:
+            with open(APPS_CSV_FILE, 'w', newline='', encoding=ENCODING_FOR_CSV) as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['優先度', 'アプリ名', 'pyファイル名', '絶対パス'])
+
+                for row in range(self.table.rowCount()):
+                    row_values = []
+                    for col in range(4):
+                        item = self.table.item(row, col)
+                        row_values.append(item.text().strip() if item else "")
+
+                    # 全列が空の場合はスキップ
+                    if not any(row_values):
+                        continue
+
+                    writer.writerow(row_values)
+
+            QMessageBox.information(self, "保存完了", "アプリCSVを保存しました。")
+
+            # メイン画面の一覧も更新する
+            if self._app is not None:
+                self._app.update_file_list()
+        except Exception:
+            except_processing()
+
+    def auto_append_missing_apps(self):
+        """
+        DEFAULT_FOLDER_PATH 配下からアプリ用Pythonファイルを探索し、
+        まだCSVに登録されていないものをテーブルの末尾に追記する。
+        """
+        # 既存の絶対パス一覧を取得
+        existing_paths = set()
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 3)
+            if item:
+                existing_paths.add(item.text().strip())
+
+        app_files = find_app_python_files(DEFAULT_FOLDER_PATH)
+
+        added_count = 0
+        for priority, app_name, filename, full_path in app_files:
+            if full_path in existing_paths:
+                continue
+
+            row_index = self.table.rowCount()
+            self.table.insertRow(row_index)
+            self.table.setItem(row_index, 0, QTableWidgetItem(str(priority)))
+            self.table.setItem(row_index, 1, QTableWidgetItem(app_name))
+            self.table.setItem(row_index, 2, QTableWidgetItem(filename))
+            self.table.setItem(row_index, 3, QTableWidgetItem(full_path))
+            added_count += 1
+
+        if added_count == 0:
+            QMessageBox.information(self, "自動追記", "新しく追記するアプリはありませんでした。")
+        else:
+            QMessageBox.information(self, "自動追記", f"{added_count}件のアプリを追記しました。")
     
     
     # 各スクリプトを別々のスレッドで実行する
