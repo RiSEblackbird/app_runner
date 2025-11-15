@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                               QTreeWidgetItem, QHeaderView, QTableWidget,
                               QTableWidgetItem, QMessageBox)
 from PySide6.QtCore import Qt, QThread, QTimer
+from PySide6.QtGui import QFont
 import ctypes
 
 # 定数定義
@@ -220,6 +221,9 @@ class App(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(DESTINATION_WINDOW_TITLE)
+        # フォントスケール管理。UI構築後に _apply_font_scale で一括適用する。
+        self.font_scale_level = 0
+        self._ui_font_family = self.font().family()
         
         # メインウィジェットとレイアウトの設定
         main_widget = QWidget()
@@ -232,6 +236,7 @@ class App(QMainWindow):
         self.create_widgets()
         self.folder_path_entry.setText(DEFAULT_FOLDER_PATH)
         self.update_file_list()
+        self._apply_font_scale()
         
         # ウィンドウ位置の調整を遅延実行
         QTimer.singleShot(100, self.adjust_window_position)
@@ -273,11 +278,13 @@ class App(QMainWindow):
         self.run_button = QPushButton("RUN")
         self.run_main_button = QPushButton("RUN MAIN")
         self.exit_button = QPushButton("アプリ終了")
+        self.font_button = QPushButton("フォント: 標準")
         
         run_exit_layout.addWidget(self.run_button)
         run_exit_layout.addWidget(self.run_main_button)
         run_exit_layout.addWidget(self.edit_csv_button)
         run_exit_layout.addWidget(self.exit_button)
+        run_exit_layout.addWidget(self.font_button)
         
         # ファイル一覧エリア（3行目以降）
         self.file_tree = QTreeWidget()
@@ -302,6 +309,7 @@ class App(QMainWindow):
         self.run_main_button.clicked.connect(self.run_main_files)
         self.edit_csv_button.clicked.connect(self.open_csv_editor)
         self.exit_button.clicked.connect(self.close)
+        self.font_button.clicked.connect(self.cycle_font_scale)
         
         # レイアウトに追加
         layout = QVBoxLayout()
@@ -417,6 +425,34 @@ class App(QMainWindow):
                     time.sleep(0.1)
                 except Exception:
                     except_processing()
+
+    # ===== フォント制御 =====
+    def cycle_font_scale(self):
+        """
+        フォントプリセットを巡回し、UI全体のサイズを即時反映する。
+        """
+        self.font_scale_level = (self.font_scale_level + 1) % len(FONT_SCALE_PRESETS)
+        self._apply_font_scale()
+
+    def _apply_font_scale(self):
+        """
+        現在のプリセットを QApplication と自身へ適用する。
+        """
+        preset = FONT_SCALE_PRESETS[self.font_scale_level]
+        new_font = QFont(self._ui_font_family, preset["pt"])
+        qapp = QApplication.instance()
+        if qapp is not None:
+            qapp.setFont(new_font)
+        self.setFont(new_font)
+        self._update_font_button_label()
+
+    def _update_font_button_label(self):
+        """
+        ボタンの表記を現在のプリセット名に揃える。
+        """
+        if hasattr(self, "font_button"):
+            label = FONT_SCALE_PRESETS[self.font_scale_level]["label"]
+            self.font_button.setText(f"フォント: {label}")
 
     @staticmethod
     def extract_raw_app_name_static(file_path):
@@ -640,6 +676,13 @@ class CsvEditorWindow(QMainWindow):
 ENCODING_FOR_CSV = "utf_8_sig"
 PYTHON_FILE_EXTENSION = ".py"  # Pythonファイルの拡張子
 FONT_SIZE = 12  # 基本フォントサイズ
+# 4K等の高解像度環境でも視認できるよう、UIフォントを多段階で切替可能にするプリセット。
+FONT_SCALE_PRESETS = [
+    {"label": "標準", "pt": 11},
+    {"label": "大", "pt": 13},
+    {"label": "特大", "pt": 16},
+    {"label": "4K", "pt": 20},
+]
 APP_TITLE_PARTS = "app_"
 
 
