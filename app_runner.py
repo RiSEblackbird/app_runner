@@ -376,6 +376,41 @@ class App(QMainWindow):
         except Exception:
             except_processing()
 
+    # 各スクリプトを別々のスレッドで実行する
+    def run_python_files(self):
+        """
+        選択されたPythonファイルを新しいスレッドで一括実行する。
+        """
+        selected_items = self.file_tree.selectedItems()
+        if selected_items:
+            for item in selected_items:
+                file_path = item.text(3)  # 絶対パスは4列目
+                try:
+                    threading.Thread(target=execute_script, args=(file_path,), daemon=True).start()
+                    time.sleep(0.1)
+                except Exception:
+                    except_processing()
+
+    def run_main_files(self):
+        """
+        優先度0のPythonファイルを一括実行する。
+        """
+        main_items = []
+        # すべてのトップレベルアイテムを取得
+        for i in range(self.file_tree.topLevelItemCount()):
+            item = self.file_tree.topLevelItem(i)
+            if item.text(0) == "0":  # 優先度が0のアイテムを選択
+                main_items.append(item)
+
+        if main_items:
+            for item in main_items:
+                file_path = item.text(3)  # 絶対パスは4列目
+                try:
+                    threading.Thread(target=execute_script, args=(file_path,), daemon=True).start()
+                    time.sleep(0.1)
+                except Exception:
+                    except_processing()
+
     @staticmethod
     def extract_raw_app_name_static(file_path):
         """
@@ -558,42 +593,6 @@ class CsvEditorWindow(QMainWindow):
             QMessageBox.information(self, "自動追記", "新しく追記するアプリはありませんでした。")
         else:
             QMessageBox.information(self, "自動追記", f"{added_count}件のアプリを追記しました。")
-    
-    
-    # 各スクリプトを別々のスレッドで実行する
-    def run_python_files(self):
-        """
-        選択されたPythonファイルを新しいスレッドで一括実行する
-        """
-        selected_items = self.file_tree.selectedItems()
-        if selected_items:
-            for item in selected_items:
-                file_path = item.text(3)  # 絶対パスは4列目
-                try:
-                    threading.Thread(target=execute_script, args=(file_path,), daemon=True).start()
-                    time.sleep(0.1)
-                except Exception:
-                    except_processing()
-
-    def run_main_files(self):
-        """
-        優先度0のPythonファイルを一括実行する
-        """
-        main_items = []
-        # すべてのトップレベルアイテムを取得
-        for i in range(self.file_tree.topLevelItemCount()):
-            item = self.file_tree.topLevelItem(i)
-            if item.text(0) == "0":  # 優先度が0のアイテムを選択
-                main_items.append(item)
-        
-        if main_items:
-            for item in main_items:
-                file_path = item.text(3)  # 絶対パスは4列目
-                try:
-                    threading.Thread(target=execute_script, args=(file_path,), daemon=True).start()
-                    time.sleep(0.1)
-                except Exception:
-                    except_processing()
 
 
 # 定数定義
