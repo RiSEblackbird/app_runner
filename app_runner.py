@@ -202,8 +202,8 @@ def open_folder_in_vscode(folder_path):
         raise FileNotFoundError(f"フォルダが見つかりません: {normalized_path}")
 
     # なぜこの分岐か:
-    # Windowsでは既存の設定値を優先し、他OSでは `code` コマンドでの起動を標準化する。
-    vscode_command = CODE_EXE_PATH if IS_WINDOWS else "code"
+    # OSを問わず設定値（CODE_EXE_PATH）があれば優先し、未設定時のみ `code` にフォールバックする。
+    vscode_command = CODE_EXE_PATH or "code"
     subprocess.Popen([vscode_command, normalized_path])
 
 
