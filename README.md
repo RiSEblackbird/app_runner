@@ -23,17 +23,31 @@
 - ウィンドウ位置保存: CSV
 
 ## 使用方法
-1. アプリケーションの起動
-   - 以下のような内容でショートカットファイルを作成します：
-     ```
-     %windir%\System32\cmd.exe "/C" C:\ProgramData\Anaconda3\Scripts\activate.bat base && D: && cd D:\Tools\PythonRunner && python D:\Tools\PythonRunner\app_runner.py
-     ```
-   - このショートカットファイルをダブルクリックして起動します
-   - ショートカットの内容説明：
-     - Anaconda環境をアクティベート
-     - 作業ドライブに移動
-     - 作業ディレクトリに移動
-     - Pythonスクリプトを実行
+1. アプリケーションの起動（Windows / macOS 対応）
+   - **Windows（従来運用）**
+     - 以下のような内容でショートカットファイルを作成します：
+       ```
+       %windir%\System32\cmd.exe "/C" C:\ProgramData\Anaconda3\Scripts\activate.bat base && D: && cd D:\Tools\PythonRunner && python D:\Tools\PythonRunner\app_runner.py
+       ```
+     - このショートカットファイルをダブルクリックして起動します
+     - ショートカットの内容説明：
+       - Anaconda環境をアクティベート
+       - 作業ドライブに移動
+       - 作業ディレクトリに移動
+       - Pythonスクリプトを実行
+   - **macOS（追加対応）**
+     - 任意の仮想環境を作成し、依存をインストールします。
+       ```bash
+       python3 -m venv .venv
+       source .venv/bin/activate
+       pip install PySide6 pyyaml
+       ```
+     - その後、次のコマンドで起動します。
+       ```bash
+       python3 app_runner.py
+       ```
+     - VSCode連携を使う場合は、VSCodeのコマンドパレットから  
+       **Shell Command: Install 'code' command in PATH** を実行してください。
 
 2. フォルダの選択
    - 「選択」ボタンでフォルダを選択する
@@ -119,6 +133,8 @@
 - Pythonの実行環境が必要です（Anaconda環境推奨）
 - 適切なショートカット設定が必要です
 - ショートカットのパスは実際の環境に合わせて変更してください
+- macOS/Linux では「フォルダを開く」はOS標準のコマンド（`open` / `xdg-open`）を使います
+- macOS/Linux で「VSCodeで開く」を使うには `code` コマンドをPATHに通す必要があります
 - フォルダの書き込み権限が必要です
 - VSCode連携にはVSCodeのインストールが必要です
 - ウィンドウ位置の保存にはCSVファイルの書き込み権限が必要です
