@@ -12,9 +12,6 @@ from tkinter import font as tkfont
 import subprocess
 import threading
 import yaml
-import win32gui
-import win32con
-import win32api
 import time
 import socket
 import csv
@@ -26,6 +23,13 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PySide6.QtCore import Qt, QThread, QTimer
 from PySide6.QtGui import QFont
 import ctypes
+
+IS_WINDOWS = sys.platform == "win32"
+
+if IS_WINDOWS:
+    import win32api
+    import win32con
+    import win32gui
 
 # 定数定義
 TARGET_WINDOW_TITLE = "GUIツールランナー.exe"
@@ -43,6 +47,13 @@ HOSTNAME = socket.gethostname()
 
 # ウインドウを指定のウインドウの内側に移動する関数
 def move_window_inside_relative(target_title, destination_title, padding):
+    """
+    Windows環境でのみ、既存ウィンドウの相対位置を調整する。
+    macOS/Linuxでは何もしない。
+    """
+    if not IS_WINDOWS:
+        return
+
     print("処理を開始します。")
     # 移動先のウインドウの位置とサイズを取得
     hwnd_dest = win32gui.FindWindow(None, destination_title)
@@ -94,7 +105,7 @@ def save_position(root):
     geometry_str = f"{geom.width()}x{geom.height()}+{geom.x()}+{geom.y()}"
     position_data = [HOSTNAME, geometry_str]
     print(f"保存データ: {position_data}")
-    with open(POSITION_FILE, 'w', newline='', encoding="utf_8_sig") as csvfile:
+    with open(POSITION_FILE, 'w', newline='', encoding=ENCODING_FOR_CSV) as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(position_data)
     print("保存完了")
@@ -105,7 +116,7 @@ def restore_position(root):
     """
     print("ウィンドウ位置を復元中...")
     try:
-        with open(POSITION_FILE, newline='', encoding="utf_8_sig") as csvfile:
+        with open(POSITION_FILE, newline='', encoding=ENCODING_FOR_CSV) as csvfile:
             reader = csv.reader(csvfile)
             for row in reader:
                 if row[0] == HOSTNAME:
@@ -151,6 +162,49 @@ def except_processing():
     t, v, tb = sys.exc_info()
     trace = traceback.format_exception(t, v, tb)
     messagebox.showerror("エラーが発生しました", ''.join(trace))
+
+
+def open_folder_in_file_manager(folder_path):
+    """
+    OSごとの標準ファイルマネージャーでフォルダを開く。
+    - Windows: explorer (os.startfile)
+    - macOS: Finder (open)
+    - Linux: xdg-open
+    """
+    if not folder_path:
+        raise ValueError("フォルダパスが指定されていません。")
+
+    normalized_path = os.path.normpath(folder_path)
+    if not os.path.isdir(normalized_path):
+        raise FileNotFoundError(f"フォルダが見つかりません: {normalized_path}")
+
+    if IS_WINDOWS:
+        os.startfile(normalized_path)
+        return
+
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", normalized_path])
+        return
+
+    subprocess.Popen(["xdg-open", normalized_path])
+
+
+def open_folder_in_vscode(folder_path):
+    """
+    VSCode CLI（code）で対象フォルダを開く。
+    固定パス設定が未定義でも、macOS/Linuxで起動できるようにフォールバックする。
+    """
+    if not folder_path:
+        raise ValueError("フォルダパスが指定されていません。")
+
+    normalized_path = os.path.normpath(folder_path)
+    if not os.path.isdir(normalized_path):
+        raise FileNotFoundError(f"フォルダが見つかりません: {normalized_path}")
+
+    # なぜこの分岐か:
+    # Windowsでは既存の設定値を優先し、他OSでは `code` コマンドでの起動を標準化する。
+    vscode_command = CODE_EXE_PATH if IS_WINDOWS else "code"
+    subprocess.Popen([vscode_command, normalized_path])
 
 
 def find_app_python_files(base_folder):
@@ -247,6 +301,8 @@ class App(QMainWindow):
         """
         # アプリのウインドウが作成された後にウインドウ位置を調整
         move_window_inside_relative(TARGET_WINDOW_TITLE, DESTINATION_WINDOW_TITLE, INNER_PADDING)
+        if not IS_WINDOWS:
+            return
         # DESTINATION_WINDOW_TITLE のウィンドウを最前面に表示
         hwnd = win32gui.FindWindow(None, DESTINATION_WINDOW_TITLE)
         if hwnd:
@@ -335,18 +391,26 @@ class App(QMainWindow):
 
     def open_folder(self):
         folder_path = self.folder_path_entry.text()  # フォルダパスを取得
-        if sys.platform == "win32":
-            os.startfile(folder_path)
-        else:
-            subprocess.Popen(["open", folder_path])
+        try:
+            open_folder_in_file_manager(folder_path)
+        except Exception as e:
+            messagebox.showerror("エラー", f"フォルダを開けませんでした: {e}")
 
 
     def open_vscode(self):
         folder_path = self.folder_path_entry.text()
-        # パスを正規化
-        folder_path = os.path.normpath(folder_path)
-        print([CODE_EXE_PATH, folder_path])
-        subprocess.Popen([CODE_EXE_PATH, folder_path])
+        try:
+            open_folder_in_vscode(folder_path)
+        except FileNotFoundError as e:
+            messagebox.showerror("エラー", str(e))
+        except Exception as e:
+            # なぜこのエラー文言か:
+            # macOS/Linuxでは code コマンド未導入が起こりやすく、対処がわかるガイダンスを返す。
+            messagebox.showerror(
+                "エラー",
+                f"VSCodeで開けませんでした: {e}\n"
+                "macOS/Linuxでは、コマンドパレットで 'Shell Command: Install code command in PATH' を実行してください。"
+            )
 
 
     def browse_folder(self):
@@ -701,7 +765,8 @@ def parse_priority(value, fallback=999):
 yaml_settings_path = 'desktop_gui_settings.yaml'
 settings = load_yaml_settings(yaml_settings_path)
 DEFAULT_FOLDER_PATH = settings["app_runner"]["DEFAULT_FOLDER_PATH"]
-CODE_EXE_PATH = settings["app_runner"]["CODE_EXE_PATH"]
+# Windowsでは設定ファイルの固定パスを使い、他OSでは `code` コマンドへフォールバックする。
+CODE_EXE_PATH = settings["app_runner"].get("CODE_EXE_PATH", "code")
 
 # メイン処理
 if __name__ == '__main__':

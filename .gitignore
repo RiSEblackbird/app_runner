@@ -2,3 +2,19 @@
 *.csv
 *.db
 *.yaml
+
+# セキュリティ/ローカル環境向け: 認証情報や個人環境依存ファイルを除外
+.env
+.env.*
+*.pem
+*.key
+*.p12
+
+# Python仮想環境・キャッシュ
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# macOSのメタデータ
+.DS_Store
