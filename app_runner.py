@@ -3,44 +3,96 @@
 
 import os
 import sys
-import tkinter as tk
 import traceback
 from datetime import datetime, timedelta
-from tkinter import filedialog
-from tkinter import messagebox
-from tkinter import font as tkfont
 import subprocess
 import threading
-import yaml
 import time
 import socket
 import csv
-from tkinter import ttk
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                              QHBoxLayout, QLineEdit, QPushButton, QTreeWidget,
-                              QTreeWidgetItem, QHeaderView, QTableWidget,
-                              QTableWidgetItem, QMessageBox)
-from PySide6.QtCore import Qt, QThread, QTimer
-from PySide6.QtGui import QFont
 import ctypes
 
 IS_WINDOWS = sys.platform == "win32"
 
+
+def show_startup_error(title, message):
+    """
+    アプリ初期化前の失敗を標準エラー出力とダイアログの両方へ通知する。
+    """
+    print(message, file=sys.stderr)
+    try:
+        startup_app = QApplication.instance()
+        owns_app = startup_app is None
+        if owns_app:
+            startup_app = QApplication(sys.argv)
+        QMessageBox.critical(None, title, message)
+        if owns_app:
+            startup_app.quit()
+    except Exception:
+        # GUI初期化に失敗した環境でも標準エラー出力だけは残す。
+        pass
+
+
+def abort_startup(title, message):
+    """
+    起動前提を満たせないときは理由を明示して即座に終了する。
+    """
+    show_startup_error(title, message)
+    raise SystemExit(1)
+
+
+try:
+    import yaml
+except ModuleNotFoundError as error:
+    if error.name == "yaml":
+        abort_startup(
+            "依存パッケージ不足",
+            "PyYAML がインストールされていません。\n"
+            "`pip install -r requirements.txt` または `pip install PyYAML` を実行してください。",
+        )
+    raise
+
+try:
+    from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                                  QHBoxLayout, QLineEdit, QPushButton, QTreeWidget,
+                                  QTreeWidgetItem, QHeaderView, QTableWidget,
+                                  QTableWidgetItem, QMessageBox, QFileDialog)
+    from PySide6.QtCore import Qt, QThread, QTimer
+    from PySide6.QtGui import QFont
+except ModuleNotFoundError as error:
+    if error.name == "PySide6":
+        abort_startup(
+            "依存パッケージ不足",
+            "PySide6 がインストールされていません。\n"
+            "`pip install -r requirements.txt` または `pip install PySide6` を実行してください。",
+        )
+    raise
+
 if IS_WINDOWS:
-    import win32api
-    import win32con
-    import win32gui
+    try:
+        import win32api
+        import win32con
+        import win32gui
+    except ModuleNotFoundError as error:
+        if error.name in {"win32api", "win32con", "win32gui"}:
+            abort_startup(
+                "依存パッケージ不足",
+                "Windows では pywin32 が必要です。\n"
+                "`pip install -r requirements.txt` または `pip install pywin32` を実行してください。",
+            )
+        raise
 
 # 定数定義
 TARGET_WINDOW_TITLE = "GUIツールランナー.exe"
 DESTINATION_WINDOW_TITLE = "Pythonファイル実行ツール"
 INNER_PADDING = 50
+APP_RUNNER_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 定数としてウィンドウ位置情報を保存するファイル名を設定
-POSITION_FILE = 'window_position_app_runner.csv'
+POSITION_FILE = os.path.join(APP_RUNNER_DIR, 'window_position_app_runner.csv')
 
 # アプリ情報を保存するCSVファイルパスを定数として定義
-APPS_CSV_FILE = os.path.join(os.path.dirname(__file__), "app_runner_apps.csv")
+APPS_CSV_FILE = os.path.join(APP_RUNNER_DIR, "app_runner_apps.csv")
 
 # 定数としてホスト名を取得
 HOSTNAME = socket.gethostname()
@@ -138,12 +190,56 @@ def on_close():
 # YAMLファイルを読み込むための関数
 def load_yaml_settings(file_path):
     """
-    指定されたパスのYAMLファイルを読み込んで、設定を辞書として返す。
+    指定されたパスのYAMLファイルを読み込み、必須構造を検証して返す。
     """
+    example_path = f"{file_path}.example"
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(
+            f"設定ファイルが見つかりません: {file_path}\n"
+            f"`{os.path.basename(example_path)}` をコピーして `{os.path.basename(file_path)}` を作成してください。"
+        )
+
     with open(file_path, 'r', encoding="utf-8") as file:
-        # yamlモジュールを使用して設定ファイルを読み込む
-        settings = yaml.safe_load(file)
+        try:
+            settings = yaml.safe_load(file) or {}
+        except yaml.YAMLError as error:
+            raise ValueError(f"設定ファイルのYAML構文が不正です: {file_path}") from error
+
+    if not isinstance(settings, dict):
+        raise ValueError(f"設定ファイルのルートは辞書形式である必要があります: {file_path}")
+
+    app_runner_settings = settings.get("app_runner")
+    if not isinstance(app_runner_settings, dict):
+        raise ValueError("設定ファイルに `app_runner` セクションがありません。")
+
+    if not app_runner_settings.get("DEFAULT_FOLDER_PATH"):
+        raise ValueError("設定ファイルの `app_runner.DEFAULT_FOLDER_PATH` が未設定です。")
+
     return settings
+
+
+def resolve_app_runner_path(configured_path):
+    """
+    設定ファイル内の相対パスを app_runner.py 基準の絶対パスへ変換する。
+    """
+    normalized_path = path_treatment(configured_path)
+    if os.path.isabs(normalized_path):
+        return normalized_path
+    return os.path.abspath(os.path.join(APP_RUNNER_DIR, normalized_path))
+
+
+def initialize_runtime_settings():
+    """
+    起動に必要な設定を検証し、モジュール全体で参照する定数へ反映する。
+    """
+    global DEFAULT_FOLDER_PATH, CODE_EXE_PATH
+
+    yaml_settings_path = os.path.join(APP_RUNNER_DIR, 'desktop_gui_settings.yaml')
+    settings = load_yaml_settings(yaml_settings_path)
+    app_runner_settings = settings["app_runner"]
+    DEFAULT_FOLDER_PATH = resolve_app_runner_path(app_runner_settings["DEFAULT_FOLDER_PATH"])
+    # Windowsでは設定ファイルの固定パスを使い、他OSでは `code` コマンドへフォールバックする。
+    CODE_EXE_PATH = path_treatment(app_runner_settings.get("CODE_EXE_PATH", "code")) or "code"
 
 
 # パス処理関数の定義
@@ -161,7 +257,7 @@ def except_processing():
     """
     t, v, tb = sys.exc_info()
     trace = traceback.format_exception(t, v, tb)
-    messagebox.showerror("エラーが発生しました", ''.join(trace))
+    QMessageBox.critical(None, "エラーが発生しました", ''.join(trace))
 
 
 def open_folder_in_file_manager(folder_path):
@@ -265,9 +361,9 @@ def execute_script(script_path, attempt=1):
             print(f"Error executing '{script_path}': {e}. Attempt {attempt}/{max_attempts}. Retrying...")
             execute_script(script_path, attempt + 1)
         else:
-            messagebox.showerror("エラー", f"'{script_path}' failed after {max_attempts} attempts.")
+            QMessageBox.critical(None, "エラー", f"'{script_path}' failed after {max_attempts} attempts.")
     except Exception as e:
-        messagebox.showerror("エラー", f"Unexpected error executing '{script_path}': {e}")
+        QMessageBox.critical(None, "エラー", f"Unexpected error executing '{script_path}': {e}")
 
 
 # アプリケーションクラスの定義
@@ -394,7 +490,7 @@ class App(QMainWindow):
         try:
             open_folder_in_file_manager(folder_path)
         except Exception as e:
-            messagebox.showerror("エラー", f"フォルダを開けませんでした: {e}")
+            QMessageBox.critical(self, "エラー", f"フォルダを開けませんでした: {e}")
 
 
     def open_vscode(self):
@@ -402,11 +498,12 @@ class App(QMainWindow):
         try:
             open_folder_in_vscode(folder_path)
         except FileNotFoundError as e:
-            messagebox.showerror("エラー", str(e))
+            QMessageBox.critical(self, "エラー", str(e))
         except Exception as e:
             # なぜこのエラー文言か:
             # macOS/Linuxでは code コマンド未導入が起こりやすく、対処がわかるガイダンスを返す。
-            messagebox.showerror(
+            QMessageBox.critical(
+                self,
                 "エラー",
                 f"VSCodeで開けませんでした: {e}\n"
                 "macOS/Linuxでは、コマンドパレットで 'Shell Command: Install code command in PATH' を実行してください。"
@@ -417,7 +514,7 @@ class App(QMainWindow):
         """
         フォルダ選択ダイアログを開き、選択したフォルダのPythonファイルを一覧表示する
         """
-        folder = filedialog.askdirectory()  # フォルダ選択ダイアログを表示
+        folder = QFileDialog.getExistingDirectory(self, "フォルダを選択")  # Qtのフォルダ選択ダイアログを表示
         if folder:  # フォルダが選択された場合
             # 現在はフォルダパスは「フォルダを開く」「VSCodeで開く」で利用し、
             # アプリ一覧自体はCSVから読み込む。
@@ -451,7 +548,7 @@ class App(QMainWindow):
                 item = QTreeWidgetItem([str(priority), app_name, filename, full_path])
                 self.file_tree.addTopLevelItem(item)
         except FileNotFoundError:
-            messagebox.showerror("エラー", f"アプリCSVファイルが見つかりません: {APPS_CSV_FILE}")
+            QMessageBox.critical(self, "エラー", f"アプリCSVファイルが見つかりません: {APPS_CSV_FILE}")
         except Exception:
             except_processing()
 
@@ -761,15 +858,16 @@ def parse_priority(value, fallback=999):
         return fallback
 
 
-# YAML設定ファイルパス
-yaml_settings_path = 'desktop_gui_settings.yaml'
-settings = load_yaml_settings(yaml_settings_path)
-DEFAULT_FOLDER_PATH = settings["app_runner"]["DEFAULT_FOLDER_PATH"]
-# Windowsでは設定ファイルの固定パスを使い、他OSでは `code` コマンドへフォールバックする。
-CODE_EXE_PATH = settings["app_runner"].get("CODE_EXE_PATH", "code")
+DEFAULT_FOLDER_PATH = ""
+CODE_EXE_PATH = "code"
 
 # メイン処理
 if __name__ == '__main__':
+    try:
+        initialize_runtime_settings()
+    except Exception as error:
+        abort_startup("起動設定エラー", str(error))
+
     app = QApplication(sys.argv)
     window = None  # windowをNoneで初期化
     try:

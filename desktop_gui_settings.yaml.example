@@ -1,0 +1,10 @@
+# Sample settings for app_runner
+# Relative paths are resolved from the `app_runner` folder.
+
+app_runner:
+  # Folder scanned by the "自動追記" feature and shown as the initial folder path.
+  DEFAULT_FOLDER_PATH: .
+
+  # VSCode command or absolute path to the executable.
+  # On macOS/Linux, `code` works when the command is available in PATH.
+  CODE_EXE_PATH: code

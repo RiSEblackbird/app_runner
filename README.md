@@ -36,13 +36,16 @@
        - 作業ディレクトリに移動
        - Pythonスクリプトを実行
    - **macOS（追加対応）**
-     - 任意の仮想環境を作成し、依存をインストールします。
+    - `app_runner` フォルダへ移動し、任意の仮想環境を作成して依存をインストールします。
        ```bash
+      cd /Users/Taishi/Documents/GitHub/desktop_tools/app_runner
        python3 -m venv .venv
        source .venv/bin/activate
-       pip install PySide6 pyyaml
+      pip install -r requirements.txt
+      cp desktop_gui_settings.yaml.example desktop_gui_settings.yaml
        ```
-     - その後、次のコマンドで起動します。
+    - `desktop_gui_settings.yaml` を開き、`app_runner.DEFAULT_FOLDER_PATH` を管理対象のPythonファイルがあるフォルダへ合わせてください。
+    - その後、次のコマンドで起動します。設定ファイルの相対パスは `app_runner.py` の配置フォルダ基準で解決されます。
        ```bash
        python3 app_runner.py
        ```
@@ -131,6 +134,7 @@
 
 ## 注意点
 - Pythonの実行環境が必要です（Anaconda環境推奨）
+- 初回起動前に `desktop_gui_settings.yaml.example` から `desktop_gui_settings.yaml` を作成し、`app_runner.DEFAULT_FOLDER_PATH` を設定してください
 - 適切なショートカット設定が必要です
 - ショートカットのパスは実際の環境に合わせて変更してください
 - macOS/Linux では「フォルダを開く」はOS標準のコマンド（`open` / `xdg-open`）を使います
